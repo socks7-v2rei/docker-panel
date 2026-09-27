@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>پنل اجرای داکر روی Vercel</title>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --card: #14171c;
+    --border: #262b33;
+    --text: #e6e9ee;
+    --muted: #9aa4b2;
+    --accent: #3b82f6;
+    --ok: #22c55e;
+    --err: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: Tahoma, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    justify-content: center;
+    padding: 40px 16px;
+  }
+  .card {
+    width: 100%;
+    max-width: 480px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.sub { color: var(--muted); margin: 0 0 24px; font-size: 14px; }
+  label { display: block; font-size: 13px; margin: 16px 0 6px; color: var(--muted); }
+  input {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: #0f1115;
+    color: var(--text);
+    font-size: 14px;
+  }
+  input:focus { outline: none; border-color: var(--accent); }
+  button {
+    width: 100%;
+    margin-top: 24px;
+    padding: 12px;
+    border-radius: 8px;
+    border: none;
+    background: var(--accent);
+    color: white;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.6; cursor: not-allowed; }
+  .result {
+    margin-top: 20px;
+    padding: 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.8;
+    display: none;
+    word-break: break-all;
+  }
+  .result.show { display: block; }
+  .result.ok { background: rgba(34,197,94,0.1); border: 1px solid var(--ok); }
+  .result.err { background: rgba(239,68,68,0.1); border: 1px solid var(--err); }
+  .result a { color: var(--accent); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>🐳 اجرای ایمیج داکر روی Vercel</h1>
+    <p class="sub">نام ایمیج داکر رو بده، به‌صورت خودکار به‌عنوان یه Vercel Function دیپلوی می‌شه.</p>
+
+    <label>توکن Vercel API</label>
+    <input id="token" type="password" placeholder="از vercel.com/account/tokens بگیر" />
+    <div class="hint">این توکن فقط توی مرورگر خودت نگه‌داری می‌شه و به هیچ جای دیگه‌ای فرستاده نمی‌شه.</div>
+
+    <label>نام پروژه</label>
+    <input id="projectName" type="text" placeholder="my-app" />
+
+    <label>ایمیج داکر (Docker Hub یا هر رجیستری عمومی)</label>
+    <input id="image" type="text" placeholder="nginx:latest یا user/image:tag" />
+
+    <label>پورت (اختیاری — پیش‌فرض 80)</label>
+    <input id="port" type="text" placeholder="80" />
+
+    <label>Team ID (اختیاری)</label>
+    <input id="teamId" type="text" placeholder="اگه پروژه زیر یه تیمه" />
+
+    <button id="deployBtn">دیپلوی کن</button>
+
+    <div id="result" class="result"></div>
+  </div>
+
+<script>
+const deployBtn = document.getElementById('deployBtn');
+const resultBox = document.getElementById('result');
+
+function showResult(html, ok) {
+  resultBox.className = 'result show ' + (ok ? 'ok' : 'err');
+  resultBox.innerHTML = html;
+}
+
+async function pollStatus(token, id, teamId) {
+  for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 4000));
+    const qs = new URLSearchParams({ token, id });
+    if (teamId) qs.set('teamId', teamId);
+    const r = await fetch('/api/status?' + qs.toString());
+    const data = await r.json();
+    if (!r.ok) return;
+    if (data.readyState === 'READY') {
+      showResult(
+        '✅ آماده شد!<br>آدرس: <a href="https://' + data.url.replace(/^https?:\/\//,'') + '" target="_blank">' + data.url + '</a>',
+        true
+      );
+      return;
+    }
+    if (data.readyState === 'ERROR' || data.readyState === 'CANCELED') {
+      showResult('❌ دیپلوی با خطا مواجه شد یا لغو شد. وضعیت: ' + data.readyState, false);
+      return;
+    }
+    showResult('⏳ در حال ساخت... وضعیت فعلی: ' + data.readyState, true);
+  }
+}
+
+deployBtn.addEventListener('click', async () => {
+  const token = document.getElementById('token').value.trim();
+  const projectName = document.getElementById('projectName').value.trim();
+  const image = document.getElementById('image').value.trim();
+  const port = document.getElementById('port').value.trim();
+  const teamId = document.getElementById('teamId').value.trim();
+
+  if (!token || !projectName || !image) {
+    showResult('لطفاً توکن، نام پروژه و ایمیج داکر رو وارد کن.', false);
+    return;
+  }
+
+  deployBtn.disabled = true;
+  deployBtn.textContent = 'در حال ارسال...';
+  showResult('⏳ در حال ساخت دیپلوی...', true);
+
+  try {
+    const r = await fetch('/api/deploy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, projectName, image, port, teamId })
+    });
+    const data = await r.json();
+
+    if (!r.ok) {
+      showResult('❌ خطا: ' + (data.error || 'نامشخص'), false);
+      return;
+    }
+
+    showResult(
+      '⏳ دیپلوی ساخته شد، در حال بررسی وضعیت...<br>Inspector: <a href="' + data.inspectorUrl + '" target="_blank">مشاهده در داشبورد</a>',
+      true
+    );
+
+    await pollStatus(token, data.id, teamId);
+  } catch (err) {
+    showResult('❌ خطا: ' + err.message, false);
+  } finally {
+    deployBtn.disabled = false;
+    deployBtn.textContent = 'دیپلوی کن';
+  }
+});
+</script>
+</body>
+</html>
